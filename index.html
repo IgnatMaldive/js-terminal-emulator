@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JavaScript Terminal Emulator</title>
+    <style>
+        /* Enhanced styles */
+        body {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Courier New', monospace;
+            margin: 0;
+            padding: 10px;
+        }
+        #terminal {
+            white-space: pre-wrap;
+            overflow-y: auto;
+            max-height: 100vh;
+        }
+        .prompt {
+            color: #3CB371;
+        }
+        .input {
+            display: inline;
+        }
+        .cursor {
+            background-color: #d4d4d4;
+            width: 8px;
+            height: 1em;
+            display: inline-block;
+            vertical-align: bottom;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            from, to {
+                background-color: transparent;
+            }
+            50% {
+                background-color: #d4d4d4;
+            }
+        }
+        .directory {
+            color: #6495ED;
+        }
+    </style>
+</head>
+<body>
+    <div id="terminal"></div>
+    <script>
+        // Updated script with 'clear' command fix
+        document.addEventListener('DOMContentLoaded', () => {
+            const terminal = document.getElementById('terminal');
+            let inputBuffer = '';
+            let currentPath = '/';
+            let filesystem = loadFileSystem();
+            let commandHistory = [];
+            let historyIndex = -1;
+
+            function loadFileSystem() {
+                let fs = JSON.parse(localStorage.getItem('filesystem'));
+                if (!fs) {
+                    fs = { '/': {} };
+                    saveFileSystem(fs);
+                }
+                return fs;
+            }
+
+            function saveFileSystem(fs) {
+                localStorage.setItem('filesystem', JSON.stringify(fs));
+            }
+
+            function print(text) {
+                terminal.innerHTML += text;
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+
+            function prompt() {
+                // Remove 'input' and 'cursor' classes from previous elements
+                const inputs = document.querySelectorAll('.input');
+                inputs.forEach(input => {
+                    input.classList.remove('input');
+                });
+                const cursors = document.querySelectorAll('.cursor');
+                cursors.forEach(cursor => {
+                    cursor.classList.remove('cursor');
+                });
+                print(`<span class="prompt">user@web:${currentPath}$ </span><span class="input"></span><span class="cursor"></span>`);
+            }
+
+            function clearInput() {
+                inputBuffer = '';
+            }
+
+            function updateInput() {
+                const inputs = document.getElementsByClassName('input');
+                inputs[inputs.length - 1].innerText = inputBuffer;
+            }
+
+            function handleInput(e) {
+                const key = e.key;
+                if (key === 'Enter') {
+                    print('\n');
+                    processCommand(parseInput(inputBuffer.trim()));
+                    if (inputBuffer.trim()) {
+                        commandHistory.push(inputBuffer.trim());
+                        historyIndex = commandHistory.length;
+                    }
+                    clearInput();
+                    prompt();
+                } else if (key === 'Backspace') {
+                    inputBuffer = inputBuffer.slice(0, -1);
+                    updateInput();
+                } else if (key === 'Tab') {
+                    e.preventDefault();
+                    autocompleteInput();
+                } else if (key.length === 1) {
+                    inputBuffer += key;
+                    updateInput();
+                } else if (key === 'ArrowUp') {
+                    if (historyIndex > 0) {
+                        historyIndex--;
+                        inputBuffer = commandHistory[historyIndex];
+                        updateInput();
+                    }
+                    e.preventDefault();
+                } else if (key === 'ArrowDown') {
+                    if (historyIndex < commandHistory.length - 1) {
+                        historyIndex++;
+                        inputBuffer = commandHistory[historyIndex];
+                        updateInput();
+                    } else {
+                        historyIndex = commandHistory.length;
+                        inputBuffer = '';
+                        updateInput();
+                    }
+                    e.preventDefault();
+                }
+            }
+
+            function handlePaste(e) {
+                e.preventDefault();
+                const pasteText = (e.clipboardData || window.clipboardData).getData('text');
+                inputBuffer += pasteText;
+                updateInput();
+            }
+
+            // Function to parse input with quotes handling
+            function parseInput(input) {
+                const args = [];
+                let current = '';
+                let inQuotes = false;
+                for (let i = 0; i < input.length; i++) {
+                    const char = input[i];
+                    if (char === '"' || char === "'") {
+                        inQuotes = !inQuotes;
+                    } else if (char === ' ' && !inQuotes) {
+                        if (current !== '') {
+                            args.push(current);
+                            current = '';
+                        }
+                    } else {
+                        current += char;
+                    }
+                }
+                if (current !== '') {
+                    args.push(current);
+                }
+                return args;
+            }
+
+            function autocompleteInput() {
+                const tokens = parseInput(inputBuffer.trim());
+                const currentInput = tokens.pop() || '';
+                const dir = getDirectory(currentPath);
+                const suggestions = Object.keys(dir).filter(name => name.startsWith(currentInput));
+                if (suggestions.length === 1) {
+                    tokens.push(suggestions[0]);
+                    inputBuffer = tokens.join(' ') + ' ';
+                    updateInput();
+                } else if (suggestions.length > 1) {
+                    print('\n' + suggestions.join(' ') + '\n');
+                    prompt();
+                    const inputs = document.getElementsByClassName('input');
+                    inputs[inputs.length - 1].innerText = inputBuffer;
+                }
+            }
+
+            function processCommand(args) {
+                const command = args[0];
+                args = args.slice(1);
+                switch (command) {
+                    case 'ls':
+                        ls();
+                        break;
+                    case 'cd':
+                        cd(args[0]);
+                        break;
+                    case 'mkdir':
+                        mkdir(args[0]);
+                        break;
+                    case 'touch':
+                        touch(args[0]);
+                        break;
+                    case 'cat':
+                        cat(args[0]);
+                        break;
+                    case 'echo':
+                        echo(args);
+                        break;
+                    case 'rm':
+                        rm(args[0]);
+                        break;
+                    case 'clear':
+                        terminal.innerHTML = '';
+                        // Removed prompt() call here
+                        break;
+                    case 'tree':
+                        tree();
+                        break;
+                    case 'help':
+                        help();
+                        break;
+                    default:
+                        if (command) {
+                            print(`Command not found: ${command}\n`);
+                        }
+                }
+            }
+
+            function ls() {
+                const dir = getDirectory(currentPath);
+                let output = '';
+                for (let name in dir) {
+                    if (typeof dir[name] === 'object') {
+                        output += `<span class="directory">${name}</span> `;
+                    } else {
+                        output += `${name} `;
+                    }
+                }
+                print(output + '\n');
+            }
+
+            function cd(path) {
+                if (!path || path === '~') {
+                    currentPath = '/';
+                } else {
+                    const newPath = resolvePath(path);
+                    if (getDirectory(newPath)) {
+                        currentPath = newPath;
+                    } else {
+                        print(`No such directory: ${path}\n`);
+                    }
+                }
+            }
+
+            function mkdir(name) {
+                if (!name) {
+                    print('mkdir: missing operand\n');
+                    return;
+                }
+                const dir = getDirectory(currentPath);
+                if (!dir[name]) {
+                    dir[name] = {};
+                    saveFileSystem(filesystem);
+                } else {
+                    print(`mkdir: cannot create directory '${name}': File exists\n`);
+                }
+            }
+
+            function touch(name) {
+                if (!name) {
+                    print('touch: missing file operand\n');
+                    return;
+                }
+                const dir = getDirectory(currentPath);
+                if (!dir[name]) {
+                    dir[name] = '';
+                    saveFileSystem(filesystem);
+                } else if (typeof dir[name] === 'object') {
+                    print(`touch: cannot create file '${name}': Is a directory\n`);
+                }
+            }
+
+            function cat(name) {
+                if (!name) {
+                    print('cat: missing file operand\n');
+                    return;
+                }
+                const dir = getDirectory(currentPath);
+                const file = dir[name];
+                if (typeof file === 'string') {
+                    print(file + '\n');
+                } else if (typeof file === 'object') {
+                    print(`cat: ${name}: Is a directory\n`);
+                } else {
+                    print(`cat: ${name}: No such file or directory\n`);
+                }
+            }
+
+            function echo(args) {
+                // Handle redirection
+                let redirect = false;
+                let append = false;
+                let fileName = '';
+                let output = [];
+                for (let i = 0; i < args.length; i++) {
+                    if (args[i] === '>' || args[i] === '>>') {
+                        redirect = true;
+                        append = args[i] === '>>';
+                        fileName = args[i + 1];
+                        break;
+                    } else {
+                        output.push(args[i]);
+                    }
+                }
+                const message = output.join(' ');
+                if (redirect) {
+                    const dir = getDirectory(currentPath);
+                    if (dir[fileName] === undefined || typeof dir[fileName] === 'string') {
+                        dir[fileName] = append ? (dir[fileName] || '') + message : message;
+                        saveFileSystem(filesystem);
+                    } else {
+                        print(`echo: cannot overwrite directory '${fileName}'\n`);
+                    }
+                } else {
+                    print(message + '\n');
+                }
+            }
+
+            function rm(name) {
+                if (!name) {
+                    print('rm: missing operand\n');
+                    return;
+                }
+                const dir = getDirectory(currentPath);
+                if (dir[name]) {
+                    delete dir[name];
+                    saveFileSystem(filesystem);
+                } else {
+                    print(`rm: cannot remove '${name}': No such file or directory\n`);
+                }
+            }
+
+            function tree() {
+                const dir = getDirectory(currentPath);
+                let output = '';
+                let totalDirs = 0;
+                let totalFiles = 0;
+
+                function traverse(dirObj, indent, parentIsLast) {
+                    const entries = Object.keys(dirObj);
+                    entries.forEach((name, index) => {
+                        const isLast = index === entries.length - 1;
+                        const prefix = indent + (parentIsLast ? '    ' : '│   ');
+                        const connector = isLast ? '└── ' : '├── ';
+                        if (typeof dirObj[name] === 'object') {
+                            // It's a directory
+                            output += prefix + connector + name + '\n';
+                            totalDirs++;
+                            traverse(dirObj[name], indent + (isLast ? '    ' : '│   '), isLast);
+                        } else {
+                            // It's a file
+                            output += prefix + connector + name + '\n';
+                            totalFiles++;
+                        }
+                    });
+                }
+
+                output += '.\n';
+                traverse(dir, '', false);
+                output += `\n${totalDirs} directories, ${totalFiles} files\n`;
+                print(output);
+            }
+
+            function help() {
+                const helpText = `
+Available commands:
+ls       - List directory contents
+cd       - Change the current directory
+mkdir    - Create a new directory
+touch    - Create a new file
+cat      - Display file contents
+echo     - Display message or write to file
+rm       - Remove files or directories
+clear    - Clear the terminal screen
+tree     - Display directory structure in a tree format
+help     - Show this help message
+`;
+                print(helpText);
+            }
+
+            function getDirectory(path) {
+                const parts = path.split('/').filter(Boolean);
+                let dir = filesystem['/'];
+
+                for (const part of parts) {
+                    if (dir[part] && typeof dir[part] === 'object') {
+                        dir = dir[part];
+                    } else {
+                        return null;
+                    }
+                }
+                return dir;
+            }
+
+            function resolvePath(path) {
+                if (path.startsWith('/')) {
+                    return path;
+                }
+                const currentParts = currentPath.split('/').filter(Boolean);
+                const newParts = path.split('/').filter(Boolean);
+                const fullPath = [...currentParts, ...newParts];
+                const resolvedParts = [];
+
+                for (const part of fullPath) {
+                    if (part === '..') {
+                        resolvedParts.pop();
+                    } else if (part !== '.') {
+                        resolvedParts.push(part);
+                    }
+                }
+                return '/' + resolvedParts.join('/');
+            }
+
+            print('Welcome to the JavaScript Terminal Emulator!\nType "help" for a list of commands.\n\n');
+            prompt();
+            document.addEventListener('keydown', handleInput);
+            document.addEventListener('paste', handlePaste); // Add event listener for paste
+        });
+    </script>
+</body>
+</html>
