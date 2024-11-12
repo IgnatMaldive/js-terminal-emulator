@@ -2,6 +2,9 @@
 
 This project is a browser-based terminal emulator written in JavaScript, HTML, and CSS. It mimics a command-line interface with basic file system functionality, allowing users to run commands like `ls`, `cd`, `mkdir`, `touch`, `cat`, and more. This terminal emulator provides an interactive experience similar to a Unix-like terminal directly within a webpage.
 
+### Screenshot
+![JavaScript Terminal Emulator Screenshot](capture.jpg)
+
 ## Features
 
 - **File System Simulation**: Includes commands for file and directory management (`ls`, `cd`, `mkdir`, `touch`, `cat`, etc.).
